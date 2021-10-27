@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+
+import os
+import ldap3 as ldap
+import sqlite3 as sql
+
+con = sql.connect('/tmp/db.sqlite')
+cur = con.cursor()
+cur.execute('''CREATE TABLE rtis (ccid text, rti text)''')
+cur.execute('''CREATE index idx_rtis_ccid on rtis(ccid)''')
+cur.execute('''CREATE index idx_rtis_rti on rtis(rti)''')
+cur.execute('''CREATE TABLE ccids (ccid text)''')
+cur.execute('''create index idx_ccid on ccids(ccid)''')
+
+base   = os.environ.get('LDAP_BASE')
+server = ldap.Server (
+              os.environ.get('LDAP_SERVER')
+             , get_info=ldap.ALL)
+c = ldap.Connection(server, authentication=ldap.SASL, sasl_mechanism=ldap.KERBEROS)
+
+c.bind()
+
+obj_ccid = ldap.ObjectDef ('uofaInetOrgPerson', c)
+r = ldap.Reader (c, obj_ccid, base=base)
+
+entries = c.extend.standard.paged_search (
+           search_base = 'ou=people,' + base
+         , search_filter = '(uofaRTI=*)'
+         , search_scope = ldap.SUBTREE
+         , attributes   = ['uid', 'uOfARTI']
+         , paged_size   = 1000
+         , size_limit   = 1000000 )
+
+ccids = []
+with open('/tmp/x', 'r') as ccidsfile:
+    ccids = ccidsfile.readlines()
+
+ccids = [ _.strip() for _ in ccids ]
+
+for ccid in ccids:
+    print(ccid)
+    cur.execute("insert into ccids values (?)", [ ccid ])
+
+stats = { 'NORTI': []
+        , 'APL':   []
+        , 'STD':   []
+        , 'OTHER': []
+        , 'NOCCID': []
+        }
+
+rtis = {}
+
+for entry in entries:
+    _ = [ str(entry['raw_attributes'][_][0].decode('UTF-8')).strip() for _ in ['uid', 'uOfARTI' ] ]
+    try:
+        rtis[ _[0] ].append(_[1])
+    except Exception:
+        rtis[ _[0] ] = [ _[1] ]
+
+    cur.execute("insert into rtis values (?,?)", _)
+
+
+for ccid in ccids:
+    if ccid in rtis.keys():
+        if 'STD' in rtis[ccid]:
+            stats['STD'].append(ccid)
+        if 'APL' in rtis[ccid]:
+            stats['APL'].append(ccid)
+        if not ( 'STD' in rtis[ccid] or 'APL' in rtis[ccid] ):
+            stats['OTHER'].append(ccid)
+    else:
+        stats['NOCCID'].append(ccid)
+
+con.commit()
+for s in stats.keys():
+    print ( '{}: {}'.format(s, len(stats[s])) )
