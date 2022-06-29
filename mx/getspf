@@ -1,0 +1,62 @@
+#!/bin/bash
+
+MAX_REDIRECTS=128
+
+_loop_detect() {
+  if [[ ${#redirections} -gt 1 ]]; then
+    if [[ " ${redirections[@]:0:${#redirections[@]}-1} " =~ " $1" ]]; then
+      echo "detected a loop: ${redirections[@]}, $1" >&2
+      echo "yes"
+    else
+      echo "no"
+    fi
+  fi
+}
+
+get_dns_a1() {
+    dig +short a "$1" |
+    tr '"' ' ' |
+    tr ' ' '\n' |
+    while read entry; do
+        echo ${entry#*:}
+    done |
+    sort -u
+}
+
+get_dns_spf1() {
+    stopdescent="no"
+    if [ ${#redirections[@]} -gt $MAX_REDIRECTS ] || [ "yes" == $(_loop_detect $1) ]; then
+      echo "aborting descent after ${#redirections[@]} redirections: ${redirections[@]}" >&2
+      stopdescent="yes"
+    fi
+    dig +short txt "$1" |
+    tr '"' ' ' |
+    tr ' ' '\n' |
+    while read entry; do
+        case "$entry" in
+            ip4:*)  echo ${entry#*:} ;;
+            a:*) get_dns_a1 ${entry#*:} ;;
+            include:*)
+              if [ "no" == $stopdescent ]; then
+                redirections+=( ${entry#*:} )
+                get_dns_spf1 ${entry#*:}
+              fi;;
+            redirect=*)
+              if [ "no" == $stopdescent ]; then
+                redirections+=( ${entry#*=} )
+                get_dns_spf1 ${entry#*=}
+              fi;;
+        esac
+    done |
+    sort -u
+}
+
+redirections=($1)
+
+ips=(`get_dns_spf1 $1`)
+
+echo "# $1"
+echo ${ips[*]} | tr " " "\n"
+echo ""
+
+
