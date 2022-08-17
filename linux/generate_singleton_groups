@@ -1,0 +1,15 @@
+csuserfile=`mktemp`
+grpsfile=/var/lib/misc/group
+
+users=$(getent -s sss group csuser | cut -d':' -f4)
+( export IFS=,;  for user in $users; do getent group $user >/dev/null || echo $user; done ) | sort > $csuserfile
+
+getent -s db group > $grpsfile
+
+for user in $(<$csuserfile); do
+  gidNumber=`getent -s sss passwd $user | cut -d':' -f4`
+  echo "$user:x:$gidNumber:"
+done >> $grpsfile
+
+rm /var/lib/misc/group.db
+make -f /usr/local/sbin/generate_singleton_groups.Makefile
