@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+
+import os
+import ldap3 as ldap
+import sys
+import sqlite3
+
+base   = os.environ.get('LDAP_BASE')
+server = ldap.Server (os.environ.get('LDAP_SERVER'), get_info=ldap.ALL)
+c = ldap.Connection( server
+     , authentication = ldap.SASL
+     , sasl_mechanism = ldap.KERBEROS)
+
+c.bind()
+
+def emplid2depts(emplid: str) -> list:
+    result = []
+
+    ccids = c.extend.standard.paged_search (
+        search_base = 'ou=people,' + base
+      , search_filter = '(&(objectClass=posixAccount)(employeeNumber=' + emplid + '))'
+      , search_scope = ldap.SUBTREE
+      , attributes   = [ 'uid' ]
+      , paged_size   = 1000
+      , size_limit   = 1 )
+    # TODO: there should only ever be a single ccid for a given employee number. Here, no detection is done if this constraint is violated. At every stage, the first result is taken as the only result.
+
+    dns = [ entry['dn'] for entry in ccids ]
+    print (dns[0])
+    depts = c.extend.standard.paged_search (
+        search_base = 'ou=departments,ou=groups,' + base
+      , search_filter = '(&(objectClass=uOfAGroup)(uniqueMember=' + dns[0] + '))'
+      , search_scope = ldap.LEVEL
+      , attributes   = [ 'cn' ]
+      , paged_size   = 1000
+      , size_limit   = 1000000 )
+    
+    # flatten the result
+    result = [ _ for __ in [ entry['attributes']['cn'] for entry in depts ] for _ in __ ]
+    return result
+
+class Depts:
+
+    db = sqlite3.connect(':memory:')
+    base   = os.environ.get('LDAP_BASE')
+    server = ldap.Server (os.environ.get('LDAP_SERVER'), get_info=ldap.ALL)
+    c = ldap.Connection( server
+         , authentication = ldap.SASL
+         , sasl_mechanism = ldap.KERBEROS)
+
+    c.bind()
+
+    def __init__(self):
+
+        db.executescript ("""
+          CREATE TABLE depts (dept TEXT, parent TEXT);
+          CREATE TABLE ddc (dept TEXT, ddc TEXT);""")
+
+        entries = self.c.extend.standard.paged_search (
+            search_base = 'ou=departments,' + base
+          , search_filter = '(objectClass=uOfADepartment)'
+          , search_scope = ldap.SUBTREE
+          , attributes   = [ 'departmentNumber', 'uOfAParentDepartment', 'cn', 'uOfACCIDAA' ]
+          , paged_size   = 1000
+          , size_limit   = 1000000 )
+
+        for entry in entries:
+            attrs = entry['attributes']
+            print(entries)
+            # db.execute("""INSERT INTO depts values (?,?)""", attrs[])
+            print ( attrs['departmentNumber'][0] + ',' + ddc )
+
+# with recursive children as( select p.dept as par, c.dept as chld from depts p left join depts c on c.parent = p.dept ), descendants(d) as ( values('630100') union select chld from children, descendants where children.par = descendants.d ) select distinct d from descendants where d is not null;
+
+if '__main__' == __name__:
+    print (emplid2depts('1225045') )
+    
