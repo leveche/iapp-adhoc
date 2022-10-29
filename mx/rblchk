@@ -1,0 +1,58 @@
+#!/usr/bin/env ruby
+# ==DNSBL Checker
+# Checks IP address against blacklists
+
+require 'resolv'
+
+lists = %w[
+sbl.spamhaus.org
+sbl-xbl.spamhaus.org
+smtp.dnsbl.sorbs.net
+socks.dnsbl.sorbs.net
+spam.dnsbl.sorbs.net
+b.barracudacentral.org
+]
+
+$stdout.sync=true
+
+if !ARGV[0]
+  exit 0
+end
+
+class Rblchk
+
+  def initialize blocklists
+    @blocklists = blocklists
+  end
+
+  def consult ip
+    if !ip.match(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/)
+      raise ArgumentError, "Invalid IP"
+    end
+    listed = []
+    check = ip.split('.').reverse.join('.')
+    @blocklists.each do |list|
+      begin
+        host = check + '.' + list
+        Resolv::getaddress(host)
+        listed << list
+      rescue Exception => e
+        case e
+        when Resolv::ResolvError
+          nil
+        when Interrupt
+          exit -1
+        end
+      end
+    end
+    return listed
+  end
+
+end
+
+ip = ARGV[0].chomp
+rblchk = Rblchk.new lists
+x = rblchk.consult ip
+if x.length > 0
+  p "#{ip},#{x.join(',')}"
+end
