@@ -1,0 +1,21 @@
+vos create -server uat-afsfs01.srv.example.org -partition a -name home
+cd /afs/.uat.example.org/
+fs mkm home
+vos release root.cell
+cd /afs/.uat.example.org/home/
+
+for i in {a..z}
+  do
+    vos create -server uat-afsfs01.srv.example.org -partition a -name home.${i}
+    fs mkm ${i} home.${i}
+    cd /afs/.uat.example.org/home/${i}
+
+    for j in {a..z}
+      do
+	vos create -server uat-afsfs01.srv.example.org -partition a -name home.${i}.${j}
+	fs mkm ${i}/${j} home.${i}.${j}
+	vos release home.${i}.${j}
+      done
+      vos release home.${i}
+  done
+vos release home
