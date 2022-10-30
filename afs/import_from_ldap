@@ -1,0 +1,9 @@
+for i in $(< /tmp/b); do
+  X=`ldapsearch -x "(&(uid=$i)(objectClass=posixaccount))" uidNumber | grep -e ^uidN | cut -d' ' -f2`
+  Y=`ldapsearch -x "(&(uid=$i)(objectClass=posixaccount))" homeDirectory | grep -e ^home | cut -d' ' -f2`
+  echo "$i $X $Y"
+  # pts cu -name $i -id $X
+  V=home.${i:0:1}.${i:1:1}.$i
+  vos create -server uat-afsfs01.srv.example.org -partition a -name $V
+  fs mkm $Y $V
+done
