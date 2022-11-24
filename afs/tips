@@ -1,0 +1,4 @@
+The easiest way to flush a cache is, as root, to:
+fs setca 1
+fs setca 0
+
