@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+
+import datetime as dt
+import re
+import sqlite3 as sql
+
+class Parser:
+
+    r = {}
+    records = []
+    newrecord = True
+
+
+    def flush_record(self) -> None:
+        if not {} == self.r:
+            self.records.append(self.r)
+        self.r = {}
+        return None
+
+    def parse_line(self, line: str) -> None:
+
+        m = re.search("""^Principal: (?P<princ>\w+)@(?P<realm>[\w\.]+)\s*"""
+                     , line)
+        if m:
+            self.flush_record()
+            self.r['princ'] = m['princ']
+            self.r['realm'] = m['realm']
+
+        m = re.search("""^Expiration date: ((?P<dow>\w+) (?P<mo>\w{3}) (?P<dom>\d{2}) (?P<hh>\d{2}):(?P<mm>\d{2}):(?P<ss>\d{2}) (?P<TZ>\w{3}) (?P<YYYY>\d{4,})\s*)|(\[(?P<never>never)\])"""
+                      , line)
+        if m:
+            if m['never']:
+                self.r['expiration'] = None
+            else:
+                self.r['expiration'] = dt.datetime.strptime(m['YYYY'] + ' ' + m['mo'] + ' ' + m['dom'] + ' ' 
+                                      + m['hh'] + ':' + m['mm'] + ':' + m['ss'] + ' ' + m['TZ']
+                                      , '%Y %b %d %H:%M:%S %Z')
+
+        m = re.search(r"""^Last password change: ((?P<dow>\w+) (?P<mo>\w{3}) (?P<dom>\d{2}) (?P<hh>\d{2}):(?P<mm>\d{2}):(?P<ss>\d{2}) (?P<TZ>\w{3}) (?P<YYYY>\d{4,})\s*)|(\[(?P<never>never)\])"""
+                     , line)
+        if m:
+            if m['never']:
+                self.r['last_passwd_change'] = None
+            else: 
+                self.r['last_passwd_change'] = dt.datetime.strptime(m['YYYY'] + ' ' + m['mo'] + ' ' + m['dom'] + ' ' 
+                                      + m['hh'] + ':' + m['mm'] + ':' + m['ss'] + ' ' + m['TZ']
+                                      , '%Y %b %d %H:%M:%S %Z')
+
+        m = re.search(r"""^Password expiration date:\s+((?P<dow>\w+)\s+(?P<mo>\w{3})\s+(?P<dom>\d{2})\s+(?P<hh>\d{2}):(?P<mm>\d{2}):(?P<ss>\d{2})\s+(?P<TZ>\w{3})\s+(?P<YYYY>\d{4,})\s*)|(\[(?P<never>never)\])\s+"""
+                     , line)
+        if m:
+            if m['never']:
+                self.r['passwd_expiration'] = None
+            else:
+                self.r['passwd_expiration'] = dt.datetime.strptime(m['YYYY'] + ' ' + m['mo'] + ' ' + m['dom'] + ' ' 
+                                      + m['hh'] + ':' + m['mm'] + ':' + m['ss'] + ' ' + m['TZ']
+                                      , '%Y %b %d %H:%M:%S %Z')
+
+        m = re.search(r"""^Last modified: (?P<dow>\w+) (?P<mo>\w{3}) (?P<dom>\d{2}) (?P<hh>\d{2}):(?P<mm>\d{2}):(?P<ss>\d{2}) (?P<TZ>\w{3}) (?P<YYYY>\d{4,})\s+\((?P<mod_princ>[\w\/]+)@(?P<mod_realm>[\w\.]+)\)\s*"""
+                    , line)
+        if m:
+            self.r['last_mod_date'] = dt.datetime.strptime(m['YYYY'] + ' ' + m['mo'] + ' ' + m['dom'] + ' ' 
+                                      + m['hh'] + ':' + m['mm'] + ':' + m['ss'] + ' ' + m['TZ']
+                                      , '%Y %b %d %H:%M:%S %Z')
+            self.r['last_mod_princ'] = m['mod_princ']
+            self.r['last_mod_realm'] = m['mod_realm']
+
+        m = re.search(r"""^Last successful authentication: ((?P<dow>\w+) (?P<mo>\w{3}) (?P<dom>\d{2}) (?P<hh>\d{2}):(?P<mm>\d{2}):(?P<ss>\d{2}) (?P<TZ>\w{3}) (?P<YYYY>\d{4,})\s*)|(\[(?P<never>never)\])"""
+                    , line)
+        if m:
+            if m['never']:
+                self.r['last_auth_ok'] = None
+            else:
+                self.r['last_auth_ok'] = dt.datetime.strptime(m['YYYY'] + ' ' + m['mo'] + ' ' + m['dom'] + ' ' 
+                                      + m['hh'] + ':' + m['mm'] + ':' + m['ss'] + ' ' + m['TZ']
+                                      , '%Y %b %d %H:%M:%S %Z')
+
+        m = re.search(r"""^Last failed authentication: ((?P<dow>\w+) (?P<mo>\w{3}) (?P<dom>\d{2}) (?P<hh>\d{2}):(?P<mm>\d{2}):(?P<ss>\d{2}) (?P<TZ>\w{3}) (?P<YYYY>\d{4,})\s*)|(\[(?P<never>never)\])"""
+                    , line)
+        if m:
+            if m['never']:
+                self.r['last_auth_nok'] = None
+            else:
+                self.r['last_auth_nok'] = dt.datetime.strptime(m['YYYY'] + ' ' + m['mo'] + ' ' + m['dom'] + ' ' 
+                                      + m['hh'] + ':' + m['mm'] + ':' + m['ss'] + ' ' + m['TZ']
+                                      , '%Y %b %d %H:%M:%S %Z')
+
+        m = re.search(r"""^Key: vno\s+(?P<kvno>\d+),\s+(?P<etype>[\w\-\:]+)\s*"""
+                    , line)
+        if m:
+            try:
+                self.r['keys']
+            except KeyError as e:
+                self.r['keys'] = []
+            finally:
+                self.r['keys'].append([ {'kvno': m['kvno']}, {'etype': m['etype']} ] )
+
+class DbUpdater():
+
+    db = None
+    realms = {}
+    etypes = {}
+    princs = {}
+    
+
+    def __init__(self) -> None:
+        self.db = sql.connect("./krb.sqlite")
+
+        self.db.executescript ("""
+          CREATE TABLE IF NOT EXISTS
+            etypes ( id INTEGER PRIMARY KEY
+                   , etype TEXT UNIQUE NOT NULL );
+
+          CREATE TABLE IF NOT EXISTS
+            realms ( id INTEGER PRIMARY KEY AUTOINCREMENT
+                              , realm TEXT );
+
+          CREATE TABLE IF NOT EXISTS
+            princs ( id INTEGER PRIMARY KEY AUTOINCREMENT
+                              , princ TEXT NOT NULL
+                              , realm INTEGER NOT NULL
+                              , FOREIGN KEY(realm) REFERENCES realms(id)
+                              , CONSTRAINT unq UNIQUE (princ, realm) );
+
+          CREATE TABLE IF NOT EXISTS
+            keys ( princ INTEGER NOT NULL
+                            , etype INTEGER NOT NULL
+                            , as_of TIMESTAMP NOT NULL
+                            , FOREIGN KEY(princ) REFERENCES princs(id)
+                            , FOREIGN KEY(etype) REFERENCES etypes(id) );
+
+          CREATE TABLE IF NOT EXISTS
+            princdata ( princ INTEGER NOT NULL
+                                 , update_time TIMESTAMP NOT NULL
+                                 , exp_date    TIMESTAMP
+                                 , passwd_expiration TIMESTAMP
+                                 , last_modified      TIMESTAMP
+                                 , last_modifier      INTEGER
+                                 , last_auth_ok       TIMESTAMP
+                                 , last_auth_nok      TIMESTAMP
+                                 , FOREIGN KEY(princ)         REFERENCES princs(id)
+                                 , FOREIGN KEY(last_modifier) REFERENCES princs(id) ); """)
+
+        self.db.executescript("""INSERT OR IGNORE INTO etypes 
+                                 VALUES ( 1, 'des-cbc-crc')
+                                      , (-1,  'des-cbc-crc:afs3')
+                                      , (17, 'aes128-cts-hmac-sha1-96')
+                                      , (18, 'aes256-cts-hmac-sha1-96')
+                                      , (19, 'aes128-cts-hmac-sha256-128')
+                                      , (20, 'aes256-cts-hmac-sha384-192') """)
+
+        self.db.executescript("""INSERT OR IGNORE INTO realms
+                                 VALUES ( 1, 'EXAMPLE.NET');""")
+
+        self.db.row_factory = sql.Row
+        c = self.db.cursor()
+        c.execute("SELECT id, realm FROM realms")
+        for row in c.fetchall():
+            row = dict(row)
+            self.realms[ row['realm'] ] = row['id']
+
+        c.execute("SELECT id, etype FROM etypes")
+        for row in c.fetchall():
+            row = dict(row)
+            self.etypes[ row['etype'] ] = row ['id']
+        
+        c.execute("SELECT id, princ FROM princs")
+        for row in c.fetchall():
+            row = dict(row)
+            self.princs[ row['princ'] ] = row ['id']
+
+
+    def update(self, records: dict) -> None:
+        c = self.db.cursor()
+        for r in records:
+            try:
+                self.princs[ r['last_mod_princ'] ]
+            except KeyError:
+               c.execute("""INSERT INTO princs (princ, realm) VALUES (?,?);""", (r['last_mod_princ'], 1) )
+               c.execute("""SELECT id, princ FROM princs WHERE princ = ?;""", [ r['last_mod_princ'] ] )
+               self.db.commit()
+               for row in c.fetchall():
+                   self.princs[ r['last_mod_princ'] ] = dict(row)['id']
+
+            try:
+                self.princs[ r['princ'] ]
+            except KeyError:
+               c.execute("""INSERT INTO princs (princ, realm) VALUES (?,?);""", (r['princ'], 1) )
+               c.execute("""SELECT id, princ FROM princs WHERE princ = ?;""", [r['princ']] )
+               self.db.commit()
+               for row in c.fetchall():
+                   self.princs[ r['princ'] ] = dict(row)['id']
+            finally:
+               c.execute("""INSERT INTO 
+                           princdata (princ, update_time, exp_date, passwd_expiration, last_modified, last_modifier, last_auth_ok, last_auth_nok)
+                           VALUES (?,?,?,?,?,?,?,?)"""
+                           , ( self.princs[ r['princ'] ], T, r['expiration'], r['passwd_expiration']
+                           , r['last_mod_date'], self.princs[r['last_mod_princ']], r['last_auth_ok'], r['last_auth_nok'] ) ) 
+               for k in r['keys']:
+                   c.execute(  """INSERT INTO keys (princ, etype, as_of) VALUES  (?, ?, ?)"""
+                            ,  ( self.princs[r['princ']], self.etypes [k[1]['etype']], T  ) )
+
+               self.db.commit()
+
+if '__main__' == __name__:
+
+    T = dt.datetime.now()
+
+    with open('/tmp/oo', 'r') as dumpfile:
+        dump = dumpfile.readlines()
+
+    p = Parser()
+    
+    for line in dump:
+        p.parse_line(line)
+    p.flush_record()
+
+    print (p.records)
+
+    #db = DbUpdater()
+
+    #db.update(p.records)
